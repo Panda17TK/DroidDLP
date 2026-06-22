@@ -3,51 +3,72 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               script-src 'unsafe-inline';
+               connect-src 'none';
+               img-src 'none'; style-src 'none'; frame-src 'none';
+               object-src 'none'; base-uri 'none'; form-action 'none';"
+    />
     <title>DroidDLP PoToken host</title>
 
     <!--
-      bgutils-js bundle (LuanRT/BgUtils, MIT) is vendored at
-      potoken/bgutils.bundle.js and loaded below as a LOCAL asset (never a remote
-      URL). It exposes window.BG (BotGuardClient / Challenge / PoToken /
-      WebPoMinter). P0-3 fills the real BotGuard solve in droidDlpGeneratePoToken.
-      Do NOT relax allowFileAccessFromFileURLs / allowUniversalAccessFromFileURLs
-      in the Kotlin WebView settings. See third_party/bgutils-js/ for provenance.
+      bgutils-js bundle (LuanRT/BgUtils, MIT) and the DroidDLP orchestrator are
+      INLINED by Kotlin (readHostHtml) replacing the two placeholder comments below.
+      They are NOT loaded via <script src>: under loadDataWithBaseURL with an
+      https://www.youtube.com base, relative src would resolve to a network URL and
+      be blocked by blockNetworkLoads=true. The page performs NO network: the two
+      JNN POSTs are done natively in Kotlin. connect-src 'none' enforces no in-page
+      fetch as defense-in-depth. Do NOT relax allowFileAccessFromFileURLs /
+      allowUniversalAccessFromFileURLs. See third_party/bgutils-js/ for provenance.
     -->
-    <script src="bgutils.bundle.js"></script>
+    <script>
+      /*__BGUTILS_BUNDLE__*/
+    </script>
+    <script>
+      /*__POTOKEN_CLIENT__*/
+    </script>
 
     <script>
-      // Truthful flag: present iff the bgutils-js global actually loaded. The
-      // classic <script> above runs synchronously before this inline script, so
-      // window.BG is already resolved here. P0-3 fills the solve below.
+      // Truthful flag: present iff the inlined bgutils global actually loaded.
       window.BG_BUNDLE_PRESENT =
         typeof window.BG !== "undefined" &&
-        typeof window.BG.BotGuardClient === "function";
+        typeof window.BG.BotGuardClient !== "undefined" &&
+        typeof window.BG.BotGuardClient.create === "function" &&
+        typeof window.BG.WebPoMinter !== "undefined" &&
+        typeof window.BG.WebPoMinter.create === "function" &&
+        typeof window.DroidDlpPoTokenClient !== "undefined";
 
-      // Kotlin -> JS entrypoint. Kotlin invokes this via evaluateJavascript
-      // (marshaled onto the WebView UI thread) after onBridgeReady().
-      // identifier = videoId (player token) or visitorData (streaming token).
-      window.droidDlpGeneratePoToken = function (identifier) {
-        try {
-          if (!window.BG_BUNDLE_PRESENT) {
-            DroidDlpBridge.onPoTokenUnavailable("bgutils bundle not bundled yet");
-            return;
-          }
-          // STEP "a" / P0-3 fills the real BotGuard solve + PoToken mint here,
-          // then calls onPoTokenResult with EXACTLY THREE arguments. When
-          // visitorData is unknown, pass null explicitly — NEVER call with two
-          // args (the Android bridge dispatches by arity and a 2-arg call is
-          // silently dropped, hanging the request until timeout):
-          //   DroidDlpBridge.onPoTokenResult(playerPoToken, streamingPoToken, visitorData ?? null);
-          DroidDlpBridge.onPoTokenUnavailable("not implemented");
-        } catch (e) {
-          DroidDlpBridge.onPoTokenError(String(e && e.message ? e.message : e));
+      var __client = window.BG_BUNDLE_PRESENT
+        ? window.DroidDlpPoTokenClient.makeClient({
+            BG: window.BG,
+            bridge: window.DroidDlpBridge,
+            globalObj: window,
+          })
+        : null;
+
+      // Kotlin -> JS: step 1. challenge JSON + videoId.
+      window.droidDlpSolveChallenge = function (challengeJson, videoId) {
+        if (!__client) {
+          window.DroidDlpBridge.onPoTokenUnavailable("bgutils bundle not present");
+          return;
         }
+        __client.solveChallenge(challengeJson, videoId);
       };
 
-      // Signal Kotlin that the bridge + entrypoint are live. Gating the
-      // entrypoint on this avoids racing page load.
+      // Kotlin -> JS: step 2. integrity token + videoId + visitorData (may be null).
+      window.droidDlpMintTokens = function (integrityToken, videoId, visitorData) {
+        if (!__client) {
+          window.DroidDlpBridge.onPoTokenUnavailable("bgutils bundle not present");
+          return;
+        }
+        __client.mintTokens(integrityToken, videoId, visitorData);
+      };
+
+      // Signal Kotlin the bridge + entrypoints are live (gates the solve).
       window.addEventListener("load", function () {
-        DroidDlpBridge.onBridgeReady();
+        window.DroidDlpBridge.onBridgeReady();
       });
     </script>
   </head>

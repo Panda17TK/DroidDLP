@@ -8,25 +8,30 @@ package com.droiddlp.app.potoken
  * the BotGuard VM has been solved — see CLAUDE.md §7.
  */
 data class PoTokenResult(
-    /** Token attached to the `/player` request. */
+    /** Token attached to the `/player` request (bound to the videoId). */
     val playerRequestPoToken: String,
-    /** Token attached to streaming-data (download) requests. */
+    /** Token attached to streaming-data (download) requests (bound to visitorData). */
     val streamingDataPoToken: String,
-    /** Visitor/session identity the tokens were generated for, if known. */
+    /** Visitor/session identity the streaming token was generated for, if known. */
     val visitorData: String? = null,
 )
 
 /**
  * Generates YouTube PoTokens on-device.
  *
- * The real implementation (§6 P0-2..P0-4) runs `bgutils-js` inside a hidden [android.webkit.WebView].
- * Call sites depend only on this interface so the JS/WebView details stay isolated behind it
- * (boundary-abstraction rule, CLAUDE.md §5).
+ * The real implementation runs `bgutils-js` inside a hidden [android.webkit.WebView]
+ * (§6 P0-3). Call sites depend only on this interface so the JS/WebView details stay
+ * isolated behind it (boundary-abstraction rule, CLAUDE.md §5).
  */
 interface PoTokenProvider {
     /**
-     * @param identifier content binding for the token — typically a `videoId` or `visitorData`.
+     * @param videoId the video the player token is bound to.
+     * @param visitorData session/visitor identity the streaming token is bound to; when
+     *   `null` the streaming token falls back to a videoId binding.
      * @return the generated tokens, or `null` when PoToken generation is unavailable.
      */
-    suspend fun getPoToken(identifier: String): PoTokenResult?
+    suspend fun getPoToken(
+        videoId: String,
+        visitorData: String?,
+    ): PoTokenResult?
 }

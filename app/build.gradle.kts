@@ -20,6 +20,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true // WebPoTokenProvider gates debug-only logging on BuildConfig.DEBUG
     }
 
     buildTypes {
@@ -56,4 +57,5 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
+    testImplementation(libs.org.json)
 }

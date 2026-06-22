@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "name": "droiddlp-potoken-tests",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --check ../../app/src/main/assets/potoken/potoken-client.js && node --test potoken-client.test.js"
+  }
+}
