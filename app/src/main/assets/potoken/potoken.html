@@ -6,20 +6,22 @@
     <title>DroidDLP PoToken host</title>
 
     <!--
-      STEP "a" DROP-IN (LuanRT/BgUtils bundle) — exactly two edits here:
-        1. Add app/src/main/assets/potoken/bgutils.bundle.js (the built bundle).
-        2. Uncomment the <script> line directly below.
-        3. Flip BG_BUNDLE_PRESENT to true.
-      No <script src> is loaded today, so an absent bundle cannot break the
-      inline bootstrap. The bundle MUST be a LOCAL asset path — never a remote
-      URL. Do NOT relax allowFileAccessFromFileURLs / allowUniversalAccessFrom
-      FileURLs in the Kotlin WebView settings when wiring third-party JS.
+      bgutils-js bundle (LuanRT/BgUtils, MIT) is vendored at
+      potoken/bgutils.bundle.js and loaded below as a LOCAL asset (never a remote
+      URL). It exposes window.BG (BotGuardClient / Challenge / PoToken /
+      WebPoMinter). P0-3 fills the real BotGuard solve in droidDlpGeneratePoToken.
+      Do NOT relax allowFileAccessFromFileURLs / allowUniversalAccessFromFileURLs
+      in the Kotlin WebView settings. See third_party/bgutils-js/ for provenance.
     -->
-    <!-- <script src="bgutils.bundle.js"></script> -->
+    <script src="bgutils.bundle.js"></script>
 
     <script>
-      // SKELETON: no bgutils-js bundle is bundled yet. Step "a" flips this true.
-      window.BG_BUNDLE_PRESENT = false;
+      // Truthful flag: present iff the bgutils-js global actually loaded. The
+      // classic <script> above runs synchronously before this inline script, so
+      // window.BG is already resolved here. P0-3 fills the solve below.
+      window.BG_BUNDLE_PRESENT =
+        typeof window.BG !== "undefined" &&
+        typeof window.BG.BotGuardClient === "function";
 
       // Kotlin -> JS entrypoint. Kotlin invokes this via evaluateJavascript
       // (marshaled onto the WebView UI thread) after onBridgeReady().
