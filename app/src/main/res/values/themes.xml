@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Pre-Compose window theme. Dependency-free framework parent (no Material XML lib). -->
+    <style name="Theme.DroidDLP" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
