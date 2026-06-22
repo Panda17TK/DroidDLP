@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DroidDLP PoToken host</title>
+
+    <!--
+      STEP "a" DROP-IN (LuanRT/BgUtils bundle) — exactly two edits here:
+        1. Add app/src/main/assets/potoken/bgutils.bundle.js (the built bundle).
+        2. Uncomment the <script> line directly below.
+        3. Flip BG_BUNDLE_PRESENT to true.
+      No <script src> is loaded today, so an absent bundle cannot break the
+      inline bootstrap. The bundle MUST be a LOCAL asset path — never a remote
+      URL. Do NOT relax allowFileAccessFromFileURLs / allowUniversalAccessFrom
+      FileURLs in the Kotlin WebView settings when wiring third-party JS.
+    -->
+    <!-- <script src="bgutils.bundle.js"></script> -->
+
+    <script>
+      // SKELETON: no bgutils-js bundle is bundled yet. Step "a" flips this true.
+      window.BG_BUNDLE_PRESENT = false;
+
+      // Kotlin -> JS entrypoint. Kotlin invokes this via evaluateJavascript
+      // (marshaled onto the WebView UI thread) after onBridgeReady().
+      // identifier = videoId (player token) or visitorData (streaming token).
+      window.droidDlpGeneratePoToken = function (identifier) {
+        try {
+          if (!window.BG_BUNDLE_PRESENT) {
+            DroidDlpBridge.onPoTokenUnavailable("bgutils bundle not bundled yet");
+            return;
+          }
+          // STEP "a" / P0-3 fills the real BotGuard solve + PoToken mint here,
+          // then calls onPoTokenResult with EXACTLY THREE arguments. When
+          // visitorData is unknown, pass null explicitly — NEVER call with two
+          // args (the Android bridge dispatches by arity and a 2-arg call is
+          // silently dropped, hanging the request until timeout):
+          //   DroidDlpBridge.onPoTokenResult(playerPoToken, streamingPoToken, visitorData ?? null);
+          DroidDlpBridge.onPoTokenUnavailable("not implemented");
+        } catch (e) {
+          DroidDlpBridge.onPoTokenError(String(e && e.message ? e.message : e));
+        }
+      };
+
+      // Signal Kotlin that the bridge + entrypoint are live. Gating the
+      // entrypoint on this avoids racing page load.
+      window.addEventListener("load", function () {
+        DroidDlpBridge.onBridgeReady();
+      });
+    </script>
+  </head>
+  <body></body>
+</html>
