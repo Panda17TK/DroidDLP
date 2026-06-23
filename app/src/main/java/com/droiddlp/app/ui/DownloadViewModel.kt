@@ -5,9 +5,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.droiddlp.app.download.CompositeStreamExtractor
 import com.droiddlp.app.download.DirectUrlStreamExtractor
-import com.droiddlp.app.download.DownloadProgressBus
+import com.droiddlp.app.download.DownloadItem
+import com.droiddlp.app.download.DownloadQueueBus
 import com.droiddlp.app.download.DownloadService
-import com.droiddlp.app.download.DownloadState
 import com.droiddlp.app.download.NewPipeStreamExtractor
 import com.droiddlp.app.download.StreamExtractor
 import com.droiddlp.app.download.StreamFormat
@@ -24,14 +24,14 @@ import kotlin.coroutines.cancellation.CancellationException
 data class DownloadUiState(
     val resolving: Boolean = false,
     val info: StreamInfo? = null,
-    val download: DownloadState? = null,
     val error: String? = null,
+    val queue: List<DownloadItem> = emptyList(),
 )
 
 /**
- * Resolves a URL to its formats (in the ViewModel), lets the UI pick one, and
- * hands the chosen format to the foreground [DownloadService] (whose progress is
- * mirrored back via [DownloadProgressBus]). CLAUDE.md §6 P1.
+ * Resolves a URL to its formats (in the ViewModel), lets the UI pick one (and add
+ * it to the concurrent download queue), and mirrors the [DownloadQueueBus] into UI
+ * state. CLAUDE.md §6 P1.
  */
 class DownloadViewModel(application: Application) : AndroidViewModel(application) {
     private val extractor: StreamExtractor =
@@ -49,49 +49,38 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
 
     init {
         viewModelScope.launch {
-            DownloadProgressBus.state.collect { download ->
-                if (download != null) {
-                    _state.value =
-                        _state.value.copy(
-                            download = download,
-                            error = (download as? DownloadState.Failed)?.message,
-                        )
-                }
-            }
+            DownloadQueueBus.items.collect { items -> _state.value = _state.value.copy(queue = items) }
         }
     }
 
     fun resolve(url: String) {
         val target = url.trim()
         if (target.isEmpty()) {
-            _state.value = DownloadUiState(error = "URL is required")
+            _state.value = _state.value.copy(resolving = false, info = null, error = "URL is required")
             return
         }
         resolveJob?.cancel()
-        DownloadProgressBus.reset()
-        _state.value = DownloadUiState(resolving = true)
+        _state.value = _state.value.copy(resolving = true, info = null, error = null)
         resolveJob =
             viewModelScope.launch {
                 _state.value =
                     try {
                         val info = extractor.extract(target)
                         if (info.formats.isEmpty()) {
-                            DownloadUiState(info = info, error = "No downloadable formats found")
+                            _state.value.copy(resolving = false, info = info, error = "No downloadable formats found")
                         } else {
-                            DownloadUiState(info = info)
+                            _state.value.copy(resolving = false, info = info, error = null)
                         }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        DownloadUiState(error = e.message ?: e.javaClass.simpleName)
+                        _state.value.copy(resolving = false, error = e.message ?: e.javaClass.simpleName)
                     }
             }
     }
 
     fun download(format: StreamFormat) {
         val info = _state.value.info ?: return
-        DownloadProgressBus.reset()
-        _state.value = _state.value.copy(download = DownloadState.Queued, error = null)
         DownloadService.start(
             getApplication(),
             url = format.url,
@@ -100,8 +89,8 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
-    fun cancel() {
-        DownloadService.cancel(getApplication())
+    fun cancel(id: Long) {
+        DownloadService.cancel(getApplication(), id)
     }
 
     private fun buildFileName(

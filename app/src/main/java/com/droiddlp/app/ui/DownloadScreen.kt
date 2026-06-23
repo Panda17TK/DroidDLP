@@ -7,16 +7,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,27 +23,24 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.droiddlp.app.download.DownloadItem
 import com.droiddlp.app.download.DownloadState
 import com.droiddlp.app.download.StreamFormat
 
 /**
- * Resolve a YouTube or direct media URL, pick a format, and download it (in a
- * foreground service) to the system Downloads folder with live progress.
- * CLAUDE.md §6 P1.
+ * Resolve a YouTube or direct media URL, pick a format, and add it to the
+ * concurrent download queue (run by a foreground service). CLAUDE.md §6 P1.
  */
 @Composable
 fun DownloadScreen(
     state: DownloadUiState,
     onResolve: (url: String) -> Unit,
     onDownload: (StreamFormat) -> Unit,
-    onCancel: () -> Unit,
+    onCancel: (id: Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var url by rememberSaveable { mutableStateOf("") }
-    val downloading =
-        state.download is DownloadState.Running || state.download is DownloadState.Queued
 
     Column(
         modifier =
@@ -58,7 +54,7 @@ fun DownloadScreen(
         Text(
             text =
                 "Paste a YouTube or direct media URL, resolve, then pick a format. " +
-                    "Saves to Downloads/DroidDLP.",
+                    "Multiple downloads run at once; saved to Downloads/DroidDLP.",
             style = MaterialTheme.typography.bodyMedium,
         )
 
@@ -70,13 +66,8 @@ fun DownloadScreen(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = { onResolve(url) }, enabled = !state.resolving && !downloading) {
-                Text("Resolve")
-            }
-            if (downloading) {
-                OutlinedButton(onClick = onCancel) { Text("Cancel") }
-            }
+        Button(onClick = { onResolve(url) }, enabled = !state.resolving) {
+            Text("Resolve")
         }
 
         if (state.error != null) {
@@ -99,21 +90,23 @@ fun DownloadScreen(
 
         state.info?.let { info ->
             if (info.formats.isNotEmpty()) {
-                Text(
-                    text = info.title,
-                    style = MaterialTheme.typography.titleMedium,
-                )
+                Text(text = info.title, style = MaterialTheme.typography.titleMedium)
                 info.formats.forEach { format ->
                     FormatRow(
                         format = format,
-                        enabled = !downloading && !state.resolving,
+                        enabled = !state.resolving,
                         onDownload = { onDownload(format) },
                     )
                 }
             }
         }
 
-        state.download?.let { DownloadStatus(it) }
+        if (state.queue.isNotEmpty()) {
+            Text(text = "Downloads", style = MaterialTheme.typography.titleMedium)
+            state.queue.forEach { item ->
+                QueueRow(item = item, onCancel = { onCancel(item.id) })
+            }
+        }
     }
 }
 
@@ -145,50 +138,66 @@ private fun FormatRow(
 }
 
 @Composable
-private fun DownloadStatus(state: DownloadState) {
+private fun QueueRow(
+    item: DownloadItem,
+    onCancel: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                if (item.isActive) {
+                    TextButton(onClick = onCancel) { Text("Cancel") }
+                }
+            }
+            QueueItemStatus(item.state)
+        }
+    }
+}
+
+@Composable
+private fun QueueItemStatus(state: DownloadState) {
     when (state) {
         DownloadState.Queued ->
-            Text(text = "Queued…", style = MaterialTheme.typography.bodyMedium)
+            Text(text = "Queued…", style = MaterialTheme.typography.bodySmall)
 
         is DownloadState.Running -> {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                val percent = state.percent
-                if (percent != null) {
-                    LinearProgressIndicator(
-                        progress = { percent / 100f },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-                val total = state.totalBytes
-                val totalText = if (total != null) " / ${formatBytes(total)}" else ""
-                val percentText = if (percent != null) " ($percent%)" else ""
-                Text(
-                    text = "Downloading: ${formatBytes(state.downloadedBytes)}$totalText$percentText",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            val percent = state.percent
+            if (percent != null) {
+                LinearProgressIndicator(progress = { percent / 100f }, modifier = Modifier.fillMaxWidth())
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
+            val total = state.totalBytes
+            val totalText = if (total != null) " / ${formatBytes(total)}" else ""
+            Text(
+                text = "${formatBytes(state.downloadedBytes)}$totalText${percent?.let { " ($it%)" } ?: ""}",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
 
         is DownloadState.Completed ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                SelectionContainer {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(text = "Saved to Downloads", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            text = state.uri,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                        )
-                    }
-                }
-            }
+            Text(
+                text = "Saved · ${state.uri}",
+                style = MaterialTheme.typography.bodySmall,
+            )
 
-        is DownloadState.Failed -> Unit // surfaced via state.error
+        is DownloadState.Failed ->
+            Text(
+                text = "Failed: ${state.message}",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
     }
 }
 

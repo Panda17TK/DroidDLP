@@ -16,17 +16,23 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
- * Foreground service that downloads an already-resolved format (URL + filename +
- * mime) so the transfer survives the UI being backgrounded. Progress is mirrored
- * to the UI via [DownloadProgressBus] and to a progress notification with a Cancel
- * action. Resolving/format-selection happens in the ViewModel. CLAUDE.md §6 P1-4.
+ * Foreground service that downloads already-resolved formats (URL + filename +
+ * mime). Supports multiple concurrent downloads (capped by a semaphore); progress
+ * for every download is mirrored to the UI via [DownloadQueueBus] and summarised
+ * in a foreground notification with a Cancel-all action. CLAUDE.md §6 P1-4.
  */
 class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var job: Job? = null
+    private val jobs = ConcurrentHashMap<Long, Job>()
+    private val semaphore = Semaphore(MAX_CONCURRENT)
+    private val idCounter = AtomicLong(0L)
     private val engine by lazy { DownloadEngine(HttpByteSource(), MediaStoreDownloadSink(this)) }
 
     override fun onCreate() {
@@ -39,99 +45,83 @@ class DownloadService : Service() {
         flags: Int,
         startId: Int,
     ): Int {
-        if (intent?.action == ACTION_CANCEL) {
-            job?.cancel()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_CANCEL -> jobs[intent.getLongExtra(EXTRA_ID, -1L)]?.cancel()
+            ACTION_CANCEL_ALL -> jobs.values.forEach { it.cancel() }
+            else -> enqueue(intent)
         }
+        return START_NOT_STICKY
+    }
+
+    private fun enqueue(intent: Intent?) {
         val url = intent?.getStringExtra(EXTRA_URL)?.trim()
         val fileName = intent?.getStringExtra(EXTRA_FILENAME)?.trim()
         val mime = intent?.getStringExtra(EXTRA_MIME)?.trim()
         if (url.isNullOrEmpty() || fileName.isNullOrEmpty() || mime.isNullOrEmpty()) {
-            stopSelf()
-            return START_NOT_STICKY
+            if (jobs.isEmpty()) stopSelf()
+            return
         }
-        startForeground(NOTIFICATION_ID, buildNotification("Starting…", progress = null))
-        startDownload(DownloadRequest(url, fileName, mime))
-        return START_NOT_STICKY
-    }
 
-    private fun startDownload(request: DownloadRequest) {
-        job?.cancel()
-        DownloadProgressBus.reset()
-        DownloadProgressBus.setTitle(request.fileName)
-        DownloadProgressBus.publish(DownloadState.Queued)
-        job =
+        val id = idCounter.incrementAndGet()
+        val request = DownloadRequest(url, fileName, mime)
+        DownloadQueueBus.update(DownloadItem(id, fileName, DownloadState.Queued))
+        startForeground(SUMMARY_ID, summaryNotification())
+
+        val job =
             scope.launch {
                 try {
-                    engine.download(request).collect { state ->
-                        DownloadProgressBus.publish(state)
-                        updateNotification(request.fileName, state)
-                        if (state is DownloadState.Completed || state is DownloadState.Failed) {
-                            finish(state)
+                    semaphore.withPermit {
+                        engine.download(request).collect { state ->
+                            DownloadQueueBus.update(DownloadItem(id, fileName, state))
+                            updateSummary()
                         }
                     }
                 } catch (e: CancellationException) {
+                    DownloadQueueBus.update(DownloadItem(id, fileName, DownloadState.Failed("cancelled")))
                     throw e
                 } catch (e: Exception) {
-                    finish(DownloadState.Failed(e.message ?: e.javaClass.simpleName))
+                    DownloadQueueBus.update(
+                        DownloadItem(id, fileName, DownloadState.Failed(e.message ?: e.javaClass.simpleName)),
+                    )
+                } finally {
+                    jobs.remove(id)
+                    if (jobs.isEmpty()) {
+                        notificationManager().notify(SUMMARY_ID, summaryNotification(done = true))
+                        stopForeground(STOP_FOREGROUND_DETACH)
+                        stopSelf()
+                    } else {
+                        updateSummary()
+                    }
                 }
             }
+        jobs[id] = job
     }
 
-    private fun finish(state: DownloadState) {
-        DownloadProgressBus.publish(state)
-        val text = if (state is DownloadState.Completed) "Saved to Downloads" else "Download failed"
-        notificationManager().notify(NOTIFICATION_ID, buildNotification(text, progress = null, ongoing = false))
-        stopForeground(STOP_FOREGROUND_DETACH)
-        stopSelf()
+    private fun updateSummary() {
+        notificationManager().notify(SUMMARY_ID, summaryNotification())
     }
 
-    private fun updateNotification(
-        title: String,
-        state: DownloadState,
-    ) {
-        when (state) {
-            is DownloadState.Running ->
-                notificationManager().notify(
-                    NOTIFICATION_ID,
-                    buildNotification("$title — ${state.percent?.let { "$it%" } ?: "downloading"}", state.percent),
-                )
-
-            DownloadState.Queued ->
-                notificationManager().notify(NOTIFICATION_ID, buildNotification("$title — queued", null))
-
-            else -> Unit
-        }
-    }
-
-    private fun buildNotification(
-        text: String,
-        progress: Int?,
-        ongoing: Boolean = true,
-    ): Notification {
+    private fun summaryNotification(done: Boolean = false): Notification {
+        val active = DownloadQueueBus.items.value.count { it.isActive }
+        val ongoing = !done && active > 0
         val builder =
             NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_download)
                 .setContentTitle("DroidDLP")
-                .setContentText(text)
+                .setContentText(if (ongoing) "$active downloading" else "Downloads finished")
                 .setOngoing(ongoing)
                 .setOnlyAlertOnce(true)
         if (ongoing) {
-            builder.addAction(0, "Cancel", cancelPendingIntent())
-            if (progress != null) {
-                builder.setProgress(100, progress, false)
-            } else {
-                builder.setProgress(0, 0, true)
-            }
+            builder.addAction(0, "Cancel all", cancelAllPendingIntent())
         }
         return builder.build()
     }
 
-    private fun cancelPendingIntent(): PendingIntent =
+    private fun cancelAllPendingIntent(): PendingIntent =
         PendingIntent.getService(
             this,
             0,
-            Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL),
+            Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL_ALL),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
@@ -156,9 +146,12 @@ class DownloadService : Service() {
         const val EXTRA_URL = "url"
         const val EXTRA_FILENAME = "fileName"
         const val EXTRA_MIME = "mime"
+        const val EXTRA_ID = "id"
         const val ACTION_CANCEL = "com.droiddlp.app.download.action.CANCEL"
+        const val ACTION_CANCEL_ALL = "com.droiddlp.app.download.action.CANCEL_ALL"
         private const val CHANNEL_ID = "downloads"
-        private const val NOTIFICATION_ID = 1
+        private const val SUMMARY_ID = 1
+        private const val MAX_CONCURRENT = 3
 
         fun start(
             context: Context,
@@ -174,8 +167,15 @@ class DownloadService : Service() {
             ContextCompat.startForegroundService(context, intent)
         }
 
-        fun cancel(context: Context) {
-            context.startService(Intent(context, DownloadService::class.java).setAction(ACTION_CANCEL))
+        fun cancel(
+            context: Context,
+            id: Long,
+        ) {
+            context.startService(
+                Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_CANCEL)
+                    .putExtra(EXTRA_ID, id),
+            )
         }
     }
 }
