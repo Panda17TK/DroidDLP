@@ -3,14 +3,17 @@ package com.droiddlp.app.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.droiddlp.app.download.CompositeStreamExtractor
 import com.droiddlp.app.download.DirectUrlStreamExtractor
 import com.droiddlp.app.download.DownloadEngine
 import com.droiddlp.app.download.DownloadRequest
 import com.droiddlp.app.download.DownloadState
 import com.droiddlp.app.download.HttpByteSource
 import com.droiddlp.app.download.MediaStoreDownloadSink
+import com.droiddlp.app.download.NewPipeStreamExtractor
 import com.droiddlp.app.download.StreamExtractor
 import com.droiddlp.app.download.StreamInfo
+import com.droiddlp.app.potoken.PoTokenProviders
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,7 +36,13 @@ data class DownloadUiState(
  * behind the same seam. CLAUDE.md §6 P1.
  */
 class DownloadViewModel(application: Application) : AndroidViewModel(application) {
-    private val extractor: StreamExtractor = DirectUrlStreamExtractor()
+    private val extractor: StreamExtractor =
+        CompositeStreamExtractor(
+            listOf(
+                NewPipeStreamExtractor(PoTokenProviders.default(application)),
+                DirectUrlStreamExtractor(),
+            ),
+        )
     private val engine = DownloadEngine(HttpByteSource(), MediaStoreDownloadSink(application))
 
     private val _state = MutableStateFlow(DownloadUiState())

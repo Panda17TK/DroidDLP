@@ -18,6 +18,9 @@ activityCompose = "1.12.3"
 lifecycle = "2.9.3"
 composeBom = "2026.05.01"
 
+# --- YouTube extraction (GPLv3!) ---
+newpipeExtractor = "v0.26.3"
+
 # --- Test ---
 junit = "4.13.2"
 orgJson = "20240303"
@@ -50,6 +53,9 @@ compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
+
+# YouTube stream extraction. GPLv3 — makes the whole app GPLv3 (see LICENSE).
+newpipe-extractor = { group = "com.github.TeamNewPipe", name = "NewPipeExtractor", version.ref = "newpipeExtractor" }
 
 # Test
 junit = { group = "junit", name = "junit", version.ref = "junit" }

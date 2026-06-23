@@ -52,6 +52,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.kotlinx.coroutines.android)
 
+    // YouTube stream extraction (GPLv3 — see LICENSE).
+    implementation(libs.newpipe.extractor)
+
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)

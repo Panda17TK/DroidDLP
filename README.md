@@ -16,5 +16,16 @@ Requires JDK 17+ and an Android SDK with `platforms;android-36` installed
 
 ## Status
 
-Early bootstrap — minimal single-module Compose app skeleton. See `CLAUDE.md` for
-architecture, conventions, the development loop, and the secrets policy.
+Single-module Compose app with two screens (bottom nav): **Download** (paste a
+direct media URL or a YouTube URL → download to `Downloads/DroidDLP` with progress)
+and **PoToken** (on-device BotGuard solve harness). YouTube extraction uses
+NewPipeExtractor with the in-app PoToken provider wired in. Real YouTube
+extraction is device/network-verified. See [`CLAUDE.md`](CLAUDE.md) for the
+architecture, backlog, development loop, and secrets policy.
+
+## License
+
+**GPLv3** — this app embeds
+[NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) (GPLv3), which
+makes the whole app GPLv3. See [`LICENSE`](LICENSE). The vendored bgutils-js
+bundle is MIT (see [`third_party/bgutils-js/`](third_party/bgutils-js/)).

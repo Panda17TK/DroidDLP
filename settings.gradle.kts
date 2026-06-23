@@ -17,6 +17,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // NewPipeExtractor (GPLv3) is published on JitPack.
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
