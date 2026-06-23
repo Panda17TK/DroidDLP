@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.droiddlp.app.settings.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,9 +32,11 @@ import kotlin.coroutines.cancellation.CancellationException
 class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val jobs = ConcurrentHashMap<Long, Job>()
-    private val semaphore = Semaphore(MAX_CONCURRENT)
+    private val semaphore = Semaphore(SettingsStore.maxConcurrent.value)
     private val idCounter = AtomicLong(0L)
-    private val engine by lazy { DownloadEngine(HttpByteSource(), MediaStoreDownloadSink(this)) }
+    private val engine by lazy {
+        DownloadEngine(HttpByteSource(), MediaStoreDownloadSink(this, SettingsStore.effectiveSubDir()))
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -151,7 +154,6 @@ class DownloadService : Service() {
         const val ACTION_CANCEL_ALL = "com.droiddlp.app.download.action.CANCEL_ALL"
         private const val CHANNEL_ID = "downloads"
         private const val SUMMARY_ID = 1
-        private const val MAX_CONCURRENT = 3
 
         fun start(
             context: Context,

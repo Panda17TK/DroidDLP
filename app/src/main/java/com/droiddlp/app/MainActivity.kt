@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -29,17 +30,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.droiddlp.app.settings.SettingsStore
 import com.droiddlp.app.ui.DownloadScreen
 import com.droiddlp.app.ui.DownloadViewModel
 import com.droiddlp.app.ui.PoTokenScreen
 import com.droiddlp.app.ui.PoTokenViewModel
+import com.droiddlp.app.ui.SettingsScreen
 import com.droiddlp.app.ui.theme.DroidDlpTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            DroidDlpTheme {
+            val dynamicColor by SettingsStore.dynamicColor.collectAsStateWithLifecycle()
+            DroidDlpTheme(dynamicColor = dynamicColor) {
                 NotificationPermissionRequest()
                 MainScaffold()
             }
@@ -81,6 +85,12 @@ private fun MainScaffold() {
                     icon = { Icon(Icons.Filled.Lock, contentDescription = null) },
                     label = { Text("PoToken") },
                 )
+                NavigationBarItem(
+                    selected = tab == 2,
+                    onClick = { tab = 2 },
+                    icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                    label = { Text("Settings") },
+                )
             }
         },
     ) { innerPadding ->
@@ -97,7 +107,7 @@ private fun MainScaffold() {
                 )
             }
 
-            else -> {
+            1 -> {
                 val vm: PoTokenViewModel = viewModel()
                 val state by vm.state.collectAsStateWithLifecycle()
                 PoTokenScreen(
@@ -106,6 +116,8 @@ private fun MainScaffold() {
                     modifier = Modifier.padding(innerPadding),
                 )
             }
+
+            else -> SettingsScreen(modifier = Modifier.padding(innerPadding))
         }
     }
 }
