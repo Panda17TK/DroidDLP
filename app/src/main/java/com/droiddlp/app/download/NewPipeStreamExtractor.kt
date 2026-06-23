@@ -23,16 +23,17 @@ import org.schabi.newpipe.extractor.services.youtube.PoTokenResult as NewPipePoT
  */
 class NewPipeStreamExtractor(
     private val poTokenProvider: PoTokenProvider,
+    private val visitorDataProvider: VisitorDataProvider = YoutubeVisitorDataProvider(),
 ) : StreamExtractor {
     override fun canHandle(url: String): Boolean =
         runCatching {
-            NewPipeBootstrap.ensureInitialized(poTokenProvider)
+            NewPipeBootstrap.ensureInitialized(poTokenProvider, visitorDataProvider)
             NewPipe.getServiceByUrl(url).serviceId == ServiceList.YouTube.serviceId
         }.getOrDefault(false)
 
     override suspend fun extract(url: String): StreamInfo =
         withContext(Dispatchers.IO) {
-            NewPipeBootstrap.ensureInitialized(poTokenProvider)
+            NewPipeBootstrap.ensureInitialized(poTokenProvider, visitorDataProvider)
             val extractor = ServiceList.YouTube.getStreamExtractor(url)
             extractor.fetchPage()
             val title = extractor.name.ifBlank { "video" }
@@ -93,10 +94,15 @@ internal object NewPipeBootstrap {
     private var initialized = false
 
     @Synchronized
-    fun ensureInitialized(poTokenProvider: PoTokenProvider) {
+    fun ensureInitialized(
+        poTokenProvider: PoTokenProvider,
+        visitorDataProvider: VisitorDataProvider,
+    ) {
         if (initialized) return
         NewPipe.init(NewPipeDownloader())
-        YoutubeStreamExtractor.setPoTokenProvider(DroidPoTokenBridge(poTokenProvider))
+        YoutubeStreamExtractor.setPoTokenProvider(
+            DroidPoTokenBridge(poTokenProvider, visitorDataProvider),
+        )
         initialized = true
     }
 }
@@ -104,18 +110,26 @@ internal object NewPipeBootstrap {
 /** Adapts DroidDLP's [PoTokenProvider] to NewPipe's web-client PoToken SPI. */
 private class DroidPoTokenBridge(
     private val provider: PoTokenProvider,
+    private val visitorDataProvider: VisitorDataProvider,
 ) : NewPipePoTokenProvider {
-    override fun getWebClientPoToken(videoId: String): NewPipePoTokenResult? {
-        val result = runBlocking { provider.getPoToken(videoId, visitorData = null) } ?: return null
-        // NewPipe's web PoToken requires a non-null visitorData; supply one only if
-        // our provider produced it, else decline (device-refinement TODO).
-        val visitorData = result.visitorData ?: return null
-        return NewPipePoTokenResult(
-            visitorData,
-            result.playerRequestPoToken,
-            result.streamingDataPoToken,
-        )
-    }
+    @Volatile
+    private var cachedVisitorData: String? = null
+
+    override fun getWebClientPoToken(videoId: String): NewPipePoTokenResult? =
+        runBlocking {
+            // Fetch (and cache) a fresh visitorData, then mint tokens bound to it:
+            // player <- videoId, streaming <- visitorData.
+            val visitorData =
+                cachedVisitorData
+                    ?: visitorDataProvider.fetch()?.also { cachedVisitorData = it }
+                    ?: return@runBlocking null
+            val result = provider.getPoToken(videoId, visitorData) ?: return@runBlocking null
+            NewPipePoTokenResult(
+                visitorData,
+                result.playerRequestPoToken,
+                result.streamingDataPoToken,
+            )
+        }
 
     override fun getWebEmbedClientPoToken(videoId: String): NewPipePoTokenResult? = null
 
