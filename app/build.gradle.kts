@@ -27,8 +27,15 @@ android {
 
     buildTypes {
         release {
-            // R8 / resource shrinking is tuned later (see CLAUDE.md backlog).
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            // Test-only: sign the minified release with the debug key so it is
+            // installable for verification. Replace with a real keystore to distribute.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
