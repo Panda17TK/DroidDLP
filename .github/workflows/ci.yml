@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: PoToken JS tests (syntax gate + node:test)
+        run: |
+          node --check app/src/main/assets/potoken/potoken-client.js
+          cd tools/potoken-tests && node --test potoken-client.test.js
+
+      - name: Gradle — ktlint, unit tests, assembleDebug
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon ktlintCheck testDebugUnitTest assembleDebug

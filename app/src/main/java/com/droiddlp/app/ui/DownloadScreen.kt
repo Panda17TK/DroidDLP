@@ -27,20 +27,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.droiddlp.app.download.DownloadState
+import com.droiddlp.app.download.StreamFormat
 
 /**
- * Paste a direct media URL and download it to the system Downloads folder, with
- * live progress. The manual exercise of the P1 download stack. CLAUDE.md §6 P1.
+ * Resolve a YouTube or direct media URL, pick a format, and download it (in a
+ * foreground service) to the system Downloads folder with live progress.
+ * CLAUDE.md §6 P1.
  */
 @Composable
 fun DownloadScreen(
     state: DownloadUiState,
-    onStart: (url: String) -> Unit,
+    onResolve: (url: String) -> Unit,
+    onDownload: (StreamFormat) -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var url by rememberSaveable { mutableStateOf("") }
-    val busy = state.resolving || state.download is DownloadState.Running || state.download is DownloadState.Queued
+    val downloading =
+        state.download is DownloadState.Running || state.download is DownloadState.Queued
 
     Column(
         modifier =
@@ -52,40 +56,38 @@ fun DownloadScreen(
     ) {
         Text(text = "DroidDLP — Download", style = MaterialTheme.typography.headlineMedium)
         Text(
-            text = "Paste a direct media URL (http/https). It saves to Downloads/DroidDLP.",
+            text =
+                "Paste a YouTube or direct media URL, resolve, then pick a format. " +
+                    "Saves to Downloads/DroidDLP.",
             style = MaterialTheme.typography.bodyMedium,
         )
 
         OutlinedTextField(
             value = url,
             onValueChange = { url = it },
-            label = { Text("media URL") },
+            label = { Text("URL") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = { onStart(url) }, enabled = !busy) { Text("Download") }
-            if (busy) {
+            Button(onClick = { onResolve(url) }, enabled = !state.resolving && !downloading) {
+                Text("Resolve")
+            }
+            if (downloading) {
                 OutlinedButton(onClick = onCancel) { Text("Cancel") }
             }
         }
 
-        StatusArea(state)
-    }
-}
-
-@Composable
-private fun StatusArea(state: DownloadUiState) {
-    when {
-        state.error != null ->
+        if (state.error != null) {
             Text(
                 text = "Error: ${state.error}",
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
             )
+        }
 
-        state.resolving ->
+        if (state.resolving) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -93,57 +95,100 @@ private fun StatusArea(state: DownloadUiState) {
                 CircularProgressIndicator()
                 Text(text = "Resolving…", style = MaterialTheme.typography.bodyMedium)
             }
+        }
 
-        state.download is DownloadState.Completed -> CompletedCard(state.download.uri)
+        state.info?.let { info ->
+            if (info.formats.isNotEmpty()) {
+                Text(
+                    text = info.title,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                info.formats.forEach { format ->
+                    FormatRow(
+                        format = format,
+                        enabled = !downloading && !state.resolving,
+                        onDownload = { onDownload(format) },
+                    )
+                }
+            }
+        }
 
-        state.download is DownloadState.Running -> RunningView(state.download)
+        state.download?.let { DownloadStatus(it) }
+    }
+}
 
-        state.download is DownloadState.Queued ->
+@Composable
+private fun FormatRow(
+    format: StreamFormat,
+    enabled: Boolean,
+    onDownload: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.padding(12.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = format.label, style = MaterialTheme.typography.bodyLarge)
+                val size = format.sizeBytes
+                Text(
+                    text =
+                        format.kind.name.lowercase() +
+                            (if (size != null) " · ${formatBytes(size)}" else ""),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Button(onClick = onDownload, enabled = enabled) { Text("Download") }
+        }
+    }
+}
+
+@Composable
+private fun DownloadStatus(state: DownloadState) {
+    when (state) {
+        DownloadState.Queued ->
             Text(text = "Queued…", style = MaterialTheme.typography.bodyMedium)
 
-        else ->
-            Text(
-                text = "Idle. Paste a URL and tap Download.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-    }
-}
-
-@Composable
-private fun RunningView(running: DownloadState.Running) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        val percent = running.percent
-        if (percent != null) {
-            LinearProgressIndicator(progress = { percent / 100f }, modifier = Modifier.fillMaxWidth())
-        } else {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        }
-        val total = running.totalBytes
-        val totalText = if (total != null) " / ${formatBytes(total)}" else ""
-        val percentText = if (percent != null) " ($percent%)" else ""
-        Text(
-            text = "Downloading: ${formatBytes(running.downloadedBytes)}$totalText$percentText",
-            style = MaterialTheme.typography.bodySmall,
-        )
-    }
-}
-
-@Composable
-private fun CompletedCard(uri: String) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        SelectionContainer {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(text = "Saved to Downloads", style = MaterialTheme.typography.titleMedium)
+        is DownloadState.Running -> {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val percent = state.percent
+                if (percent != null) {
+                    LinearProgressIndicator(
+                        progress = { percent / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                val total = state.totalBytes
+                val totalText = if (total != null) " / ${formatBytes(total)}" else ""
+                val percentText = if (percent != null) " ($percent%)" else ""
                 Text(
-                    text = uri,
+                    text = "Downloading: ${formatBytes(state.downloadedBytes)}$totalText$percentText",
                     style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
                 )
             }
         }
+
+        is DownloadState.Completed ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                SelectionContainer {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(text = "Saved to Downloads", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = state.uri,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
+
+        is DownloadState.Failed -> Unit // surfaced via state.error
     }
 }
 

@@ -90,7 +90,8 @@ private fun MainScaffold() {
                 val state by vm.state.collectAsStateWithLifecycle()
                 DownloadScreen(
                     state = state,
-                    onStart = vm::start,
+                    onResolve = vm::resolve,
+                    onDownload = vm::download,
                     onCancel = vm::cancel,
                     modifier = Modifier.padding(innerPadding),
                 )

@@ -10,7 +10,6 @@ import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.droiddlp.app.potoken.PoTokenProviders
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -20,22 +19,14 @@ import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
- * Foreground service that resolves a URL and downloads the chosen format so the
- * transfer survives the UI being backgrounded. Progress is mirrored to the UI via
- * [DownloadProgressBus] and to a progress notification. CLAUDE.md §6 P1-4.
+ * Foreground service that downloads an already-resolved format (URL + filename +
+ * mime) so the transfer survives the UI being backgrounded. Progress is mirrored
+ * to the UI via [DownloadProgressBus] and to a progress notification with a Cancel
+ * action. Resolving/format-selection happens in the ViewModel. CLAUDE.md §6 P1-4.
  */
 class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var job: Job? = null
-
-    private val extractor: StreamExtractor by lazy {
-        CompositeStreamExtractor(
-            listOf(
-                NewPipeStreamExtractor(PoTokenProviders.default(this)),
-                DirectUrlStreamExtractor(),
-            ),
-        )
-    }
     private val engine by lazy { DownloadEngine(HttpByteSource(), MediaStoreDownloadSink(this)) }
 
     override fun onCreate() {
@@ -53,33 +44,28 @@ class DownloadService : Service() {
             return START_NOT_STICKY
         }
         val url = intent?.getStringExtra(EXTRA_URL)?.trim()
-        if (url.isNullOrEmpty()) {
+        val fileName = intent?.getStringExtra(EXTRA_FILENAME)?.trim()
+        val mime = intent?.getStringExtra(EXTRA_MIME)?.trim()
+        if (url.isNullOrEmpty() || fileName.isNullOrEmpty() || mime.isNullOrEmpty()) {
             stopSelf()
             return START_NOT_STICKY
         }
         startForeground(NOTIFICATION_ID, buildNotification("Starting…", progress = null))
-        startDownload(url)
+        startDownload(DownloadRequest(url, fileName, mime))
         return START_NOT_STICKY
     }
 
-    private fun startDownload(url: String) {
+    private fun startDownload(request: DownloadRequest) {
         job?.cancel()
         DownloadProgressBus.reset()
+        DownloadProgressBus.setTitle(request.fileName)
         DownloadProgressBus.publish(DownloadState.Queued)
         job =
             scope.launch {
                 try {
-                    val info = extractor.extract(url)
-                    DownloadProgressBus.setTitle(info.title)
-                    val format = info.formats.firstOrNull()
-                    if (format == null) {
-                        finish(DownloadState.Failed("No downloadable format"))
-                        return@launch
-                    }
-                    val request = DownloadRequest(format.url, info.title, format.mimeType)
                     engine.download(request).collect { state ->
                         DownloadProgressBus.publish(state)
-                        updateNotification(info.title, state)
+                        updateNotification(request.fileName, state)
                         if (state is DownloadState.Completed || state is DownloadState.Failed) {
                             finish(state)
                         }
@@ -168,6 +154,8 @@ class DownloadService : Service() {
 
     companion object {
         const val EXTRA_URL = "url"
+        const val EXTRA_FILENAME = "fileName"
+        const val EXTRA_MIME = "mime"
         const val ACTION_CANCEL = "com.droiddlp.app.download.action.CANCEL"
         private const val CHANNEL_ID = "downloads"
         private const val NOTIFICATION_ID = 1
@@ -175,8 +163,14 @@ class DownloadService : Service() {
         fun start(
             context: Context,
             url: String,
+            fileName: String,
+            mime: String,
         ) {
-            val intent = Intent(context, DownloadService::class.java).putExtra(EXTRA_URL, url)
+            val intent =
+                Intent(context, DownloadService::class.java)
+                    .putExtra(EXTRA_URL, url)
+                    .putExtra(EXTRA_FILENAME, fileName)
+                    .putExtra(EXTRA_MIME, mime)
             ContextCompat.startForegroundService(context, intent)
         }
 
